@@ -1,6 +1,11 @@
 *.pyc
 .vscode
-output
+.idea
+
+data
+output*
+mast3r/checkpoints
+
 build
 diff_rasterization/diff_rast.egg-info
 diff_rasterization/dist
@@ -16,3 +21,4 @@ data/sora/santorini/3_views/sparse/
 data/*
 checkpoints/*
 dist/*
+diff_rasterization/dist

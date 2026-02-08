@@ -12,18 +12,69 @@
 import torch
 from instant_splat.scene import Scene
 import os
+import json
+from time import time, perf_counter
 from tqdm import tqdm
 from os import makedirs
 from instant_splat.gaussian_renderer import render
 import torchvision
+import imageio
+import numpy as np
+from pathlib import Path
 from instant_splat.utils.general_utils import safe_state
 from argparse import ArgumentParser
 from instant_splat.arguments import ModelParams, PipelineParams, get_combined_args
 from instant_splat.gaussian_renderer import GaussianModel
 from instant_splat.utils.pose_utils import get_tensor_from_camera
+from instant_splat.scene.dataset_readers import loadCameras
+from instant_splat.utils.camera_utils import generate_interpolated_path, visualizer
+from instant_splat.utils.sfm_utils import save_time
 
 
-def render_set(model_path, name, iteration, views, gaussians, pipeline, background):
+def save_interpolate_pose(model_path, iter, n_views):
+    """Generate interpolated camera poses and save visualization"""
+    org_pose = np.load(Path(model_path) / f"pose/ours_{iter}/pose_optimized.npy")
+    visualizer(org_pose, ["green" for _ in org_pose], Path(model_path) / f"pose/ours_{iter}/poses_optimized.png")
+    n_interp = int(10 * 30 / n_views)  # 10second, fps=30
+    all_inter_pose = []
+    for i in range(n_views-1):
+        tmp_inter_pose = generate_interpolated_path(poses=org_pose[i:i+2], n_interp=n_interp)
+        all_inter_pose.append(tmp_inter_pose)
+    all_inter_pose = np.concatenate(all_inter_pose, axis=0)
+    all_inter_pose = np.concatenate([all_inter_pose, org_pose[-1][:3, :].reshape(1, 3, 4)], axis=0)
+
+    inter_pose_list = []
+    for p in all_inter_pose:
+        tmp_view = np.eye(4)
+        tmp_view[:3, :3] = p[:3, :3]
+        tmp_view[:3, 3] = p[:3, 3]
+        inter_pose_list.append(tmp_view)
+    inter_pose = np.stack(inter_pose_list, 0)
+    visualizer(inter_pose, ["blue" for _ in inter_pose], Path(model_path) / f"pose/ours_{iter}/poses_interpolated.png")
+    np.save(Path(model_path) / f"pose/ours_{iter}/pose_interpolated.npy", inter_pose)
+
+
+def images_to_video(image_folder, output_video_path, fps=30):
+    """
+    Convert images in a folder to a video.
+
+    Args:
+    - image_folder (str): The path to the folder containing the images.
+    - output_video_path (str): The path where the output video will be saved.
+    - fps (int): Frames per second for the output video.
+    """
+    images = []
+
+    for filename in sorted(os.listdir(image_folder)):
+        if filename.endswith(('.png', '.jpg', '.jpeg', '.JPG', '.PNG')):
+            image_path = os.path.join(image_folder, filename)
+            image = imageio.imread(image_path)
+            images.append(image)
+
+    imageio.mimwrite(output_video_path, images, fps=fps)
+
+
+
     render_path = os.path.join(model_path, name, "ours_{}".format(iteration), "renders")
     gts_path = os.path.join(model_path, name, "ours_{}".format(iteration), "gt")
 
@@ -162,32 +213,66 @@ def render_sets(
     #         background,
     #     )
 
-    if not skip_test:
-        render_set_optimize(
+    if not skip_train and not args.infer_video and not dataset.eval:        
+        optimized_pose = np.load(Path(args.model_path) / 'pose' / f'ours_{iteration}' / 'pose_optimized.npy')
+        viewpoint_stack = loadCameras(optimized_pose, scene.getTrainCameras())
+        render_set(
             dataset.model_path,
-            "test",
+            "train",
             scene.loaded_iter,
-            scene.getTestCameras(),
+            viewpoint_stack,
             gaussians,
             pipeline,
             background,
         )
+    else:
+        start_time = time()
+        if not skip_test:
+            render_set_optimize(
+                dataset.model_path,
+                "test",
+                scene.loaded_iter,
+                scene.getTestCameras(),
+                gaussians,
+                pipeline,
+                background,
+            )
+        end_time = time()
+        save_time(dataset.model_path, '[4] render', end_time - start_time)
+
+    if args.infer_video and not dataset.eval:
+        save_interpolate_pose(Path(args.model_path), iteration, args.n_views)
+        interp_pose = np.load(Path(args.model_path) / 'pose' / f'ours_{iteration}' / 'pose_interpolated.npy')
+        viewpoint_stack = loadCameras(interp_pose, scene.getTrainCameras())
+        render_set(
+            dataset.model_path,
+            "interp",
+            scene.loaded_iter,
+            viewpoint_stack,
+            gaussians,
+            pipeline,
+            background,
+        )
+        image_folder = os.path.join(dataset.model_path, f'interp/ours_{iteration}/renders')
+        output_video_file = os.path.join(dataset.model_path, f'interp/ours_{iteration}/interp_{args.n_views}_view.mp4')
+        images_to_video(image_folder, output_video_file, fps=30)
 
 
 if __name__ == "__main__":
     # Set up command line argument parser
     parser = ArgumentParser(description="Testing script parameters")
-    model = ModelParams(parser, sentinel=True)
+    model = ModelParams(parser, sentinel=False)
     pipeline = PipelineParams(parser)
-    parser.add_argument("--iteration", default=-1, type=int)
+    parser.add_argument("--iterations", default=-1, type=int)
     parser.add_argument("--skip_train", action="store_true")
     parser.add_argument("--skip_test", action="store_true")
     parser.add_argument("--quiet", action="store_true")
-
     parser.add_argument("--get_video", action="store_true")
     parser.add_argument("--n_views", default=None, type=int)
     parser.add_argument("--scene", default=None, type=str)
     parser.add_argument("--optim_test_pose_iter", default=500, type=int)
+    parser.add_argument("--infer_video", action="store_true")
+    parser.add_argument("--test_fps", action="store_true")
     args = get_combined_args(parser)
     print("Rendering " + args.model_path)
 
@@ -196,7 +281,7 @@ if __name__ == "__main__":
 
     render_sets(
         model.extract(args),
-        args.iteration,
+        args.iterations,
         pipeline.extract(args),
         args.skip_train,
         args.skip_test,

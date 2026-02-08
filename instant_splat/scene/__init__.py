@@ -12,11 +12,13 @@
 import os
 import random
 import json
+import numpy as np
 from instant_splat.utils.system_utils import searchForMaxIteration
 from instant_splat.scene.dataset_readers import sceneLoadTypeCallbacks
 from instant_splat.scene.gaussian_model import GaussianModel
 from instant_splat.arguments import ModelParams, GroupParams
 from instant_splat.utils.camera_utils import cameraList_from_camInfos, camera_to_JSON
+from instant_splat.utils.graphics_utils import compute_scale_gaussian_by_project_pair_pcd, fov2focal
 
 
 class Scene:
@@ -54,6 +56,8 @@ class Scene:
             scene_info = sceneLoadTypeCallbacks["Colmap"](
                 args.source_path, args.images, args.eval, args, opt
             )
+        elif os.path.exists(os.path.join(args.source_path, f"sparse_{args.n_views}")):
+            scene_info = sceneLoadTypeCallbacks["Colmap"](args.source_path, args.images, args.eval, args)
         elif os.path.exists(os.path.join(args.source_path, "transforms_train.json")):
             print("Found transforms_train.json file, assuming Blender data set!")
             scene_info = sceneLoadTypeCallbacks["Blender"](
@@ -111,8 +115,16 @@ class Scene:
                 )
             )
         else:
-            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent)
+            scale_gaussian = None
+            if args.init_scale_from_view_depth:
+                scale_gaussian = compute_scale_gaussian_by_project_pair_pcd(
+                    scene_info.point_cloud.points,
+                    np.linalg.inv(scene_info.train_poses),
+                    [[fov2focal(i.FovX, i.width), fov2focal(i.FovY, i.height)] for i in scene_info.train_cameras],
+                )
+            self.gaussians.create_from_pcd(scene_info.point_cloud, self.cameras_extent, scale_gaussian)
             self.gaussians.init_RT_seq(self.train_cameras)
+            # self.gaussians.init_exposure_seq(self.train_cameras)
 
     def save(self, iteration):
         point_cloud_path = os.path.join(
