@@ -1,0 +1,5 @@
+✨ Pixi task (_download_ckpt in default): test -e "checkpoints/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth"
+|| (
+    mkdir -p checkpoints/
+    && wget https://download.europe.naverlabs.com/ComputerVision/DUSt3R/DUSt3R_ViTLarge_BaseDecoder_512_dpt.pth -P checkpoints/
+   )

@@ -17,7 +17,7 @@ build-backend = "setuptools.build_meta"
 [tool.setuptools.packages.find]
 include = ["instant_splat*"]
 
-[tool.pixi.project]
+[tool.pixi.workspace]
 channels = ["nvidia", "nvidia/label/cuda-11.8.0", "conda-forge", "pytorch"]
 platforms = ["linux-64"]
 
@@ -40,8 +40,8 @@ instant_splat = { path = ".", editable = true }
 
 [tool.pixi.dependencies]
 python = "3.11.*"
-pytorch = { version = "2.3.1", channel = "pytorch" }
-torchvision = { version = "0.18.1", channel = "pytorch" }
+pytorch = { version = "==2.3.1", channel = "pytorch" }
+torchvision = { version = "==0.18.1", channel = "pytorch" }
 cuda = { version = "*", channel = "nvidia/label/cuda-11.8.0" }
 pytorch-cuda = { version = "11.8.*", channel = "pytorch" }
 cuda-nvcc = "11.8.*"
@@ -64,13 +64,13 @@ tyro = ">=0.8.11,<0.9"
 icecream = ">=2.1.3,<3"
 
 [tool.pixi.tasks]
-post-install = { cmd = "pwd", depends_on = ["_download_ckpt"] }
+post-install = { cmd = "pwd", depends-on = ["_download_ckpt"] }
 _modify_rasterizer = { cmd = '''sed -i 's/p_view\.z <= 0\.2f/p_view\.z <= 0.001f/' submodules/diff-gaussian-rasterization/cuda_rasterizer/auxiliary.h''' }
 _get-poses-example = { cmd = """python tools/coarse_init_infer.py --img_base_path data/TT/Family/3_views/ --n_views 3 --focal_avg""" }
 _train-example = { cmd = """python tools/train_joint.py -s data/TT/Family/3_views/ -m output/TT/Family/3_views/ --n_views 3 --scene Family --iter 300 --optim_pose""" }
 _render-example = { cmd = """python tools/render_by_interp.py -s data/TT/Family/3_views/ -m output/TT/Family/3_views/ --n_views 3 --scene Family --iter 300 --eval --get_video""" }
 _build-wheel = "python -m build"
-upload-hf = { cmd = "python tools/upload_to_hf.py", depends_on = [
+upload-hf = { cmd = "python tools/upload_to_hf.py", depends-on = [
     "_build-wheel",
 ] }
 
@@ -88,21 +88,21 @@ cmd = """
     python tools/gradio_app.py
     """
 description = "Runs Gradio frontend"
-depends_on = ["post-install"]
+depends-on = ["post-install"]
 
 [tool.pixi.tasks.dev-app]
 cmd = """
     gradio tools/gradio_app.py
     """
 description = "Runs Gradio frontend for hotreload"
-depends_on = ["post-install"]
+depends-on = ["post-install"]
 
 [tool.pixi.feature.spaces.tasks.app]
 cmd = """
     python gradio_app.py
     """
 description = "Runs Gradio frontend in huggingface spaces"
-depends_on = ["post-install"]
+depends-on = ["post-install"]
 
 [tool.pixi.feature.spaces.pypi-dependencies]
 spaces = "*"
